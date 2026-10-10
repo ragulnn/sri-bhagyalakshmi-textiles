@@ -1,0 +1,6 @@
+{
+  "name": "Sri Bhagyalakshmi Textiles — Authentic Handlooms",
+  "description": "Authentic South Indian handloom sarees direct from master pit looms in Kanchipuram, Arani, Chettinad, and Balaramapuram under ₹6,000.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

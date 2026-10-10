@@ -1,0 +1,68 @@
+name: sri-bhagyalakshmi-textiles
+services:
+  database:
+    image: postgres:16
+    container_name: sbt-database
+    environment:
+      POSTGRES_DB: textiles
+      POSTGRES_USER: textiles_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - sbt-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U textiles_user -d textiles"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sbt-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sbt-backend
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATA_DIR: /data
+      DATABASE_URL: postgres://textiles_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@database:5432/textiles
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      TRUST_PROXY: "1"
+    expose:
+      - "3000"
+    volumes:
+      - sbt-data:/data
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - sbt-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sbt-frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - sbt-network
+    restart: unless-stopped
+
+networks:
+  sbt-network:
+    name: sbt-network
+    driver: bridge
+
+volumes:
+  sbt-postgres-data:
+    name: sbt-postgres-data
+  sbt-data:
+    name: sbt-data

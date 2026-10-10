@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "EB Garamond", serif;
+  --font-sans: "Manrope", sans-serif;
+  --color-gold-accent: #c89d42;
+  --color-gold-soft: #d6ba82;
+  --color-temple-red: #801319;
+  --color-surface-stone: #eae5dc;
+  --color-surface-card: #ffffff;
+  --color-charcoal: #181512;
+}
+
+@layer base {
+  html, body {
+    margin: 0;
+    padding: 0;
+    background-color: #FAF7F2;
+    color: #181512;
+    font-family: var(--font-sans);
+  }
+}
+
+.tracking-luxury {
+  letter-spacing: 0.18em;
+}
+
+.tracking-widest2 {
+  letter-spacing: 0.25em;
+}
+
+/* Custom scrollbar styling for silk inspection */
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f0ede9;
+}
+::-webkit-scrollbar-thumb {
+  background: #c89d42;
+}
+
+
+/* Silk-inspired atmosphere and consistent motion across view changes. */
+:root { --sbt-burgundy: #351018; --sbt-gold: #c89d42; }
+body {
+  background-image: radial-gradient(circle at 12% 8%, rgba(200,157,66,.055), transparent 28%),
+                    radial-gradient(circle at 88% 40%, rgba(128,19,25,.035), transparent 32%);
+  background-attachment: fixed;
+}
+.view-transition { animation: sbt-page-enter 620ms cubic-bezier(.2,.75,.25,1) both; }
+.drawer-panel { animation: sbt-drawer-in 420ms cubic-bezier(.22,.8,.24,1) both; }
+.modal-panel { animation: sbt-modal-in 360ms cubic-bezier(.2,.75,.25,1) both; }
+.sbt-ambient { background-image: radial-gradient(rgba(200,157,66,.16) .8px, transparent .8px); background-size: 15px 15px; }
+@keyframes sbt-page-enter { from { opacity: 0; transform: translateY(14px); filter: blur(3px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes sbt-drawer-in { from { opacity: .7; transform: translateX(38px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes sbt-modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

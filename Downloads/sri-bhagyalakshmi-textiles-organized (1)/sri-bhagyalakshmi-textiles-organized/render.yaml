@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: sri-bhagyalakshmi-textiles
+    runtime: docker
+    plan: starter            # a paid plan is required to keep a disk
+    healthCheckPath: /healthz
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false          # you type this in the Render dashboard
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: shop-data
+      mountPath: /data
+      sizeGB: 1
