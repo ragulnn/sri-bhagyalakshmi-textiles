@@ -4,10 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { Pool } from 'pg';
-import { CATEGORIES, SAREES_DATA } from './seed/sareesData';
-import { setupAuth } from './auth';
-import { setupOrders } from './orders';
-import { generateSecret, otpauthUri, verifyTotp } from './twofa';
+import { CATEGORIES, SAREES_DATA } from './seed/sareesData.js';
+import { setupAuth } from './auth.js';
+import { setupOrders } from './orders.js';
+import { generateSecret, otpauthUri, verifyTotp } from './twofa.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.argv.includes('--prod');
@@ -54,7 +54,7 @@ async function initializeDatabase() {
 }
 
 async function writeStore(store: Store): Promise<void> {
-  const normalized = {
+  const normalized: Store = {
     categories: store.categories,
     sarees: store.sarees.map((s) => ({
       ...s,

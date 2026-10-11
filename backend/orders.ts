@@ -2,7 +2,7 @@ import { Express, Request, Response, RequestHandler } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { normalizePhone } from './auth';
+import { normalizePhone } from './auth.js';
 
 export const ORDER_STATUSES = ['new', 'confirmed', 'shipped', 'delivered', 'cancelled'] as const;
 type Status = (typeof ORDER_STATUSES)[number];

@@ -1,4 +1,4 @@
-import { Category, Saree } from '../types';
+import type { Category, Saree } from '../types.js';
 
 export const CATEGORIES: Category[] = [
   {

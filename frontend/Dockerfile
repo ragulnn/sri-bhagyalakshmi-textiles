@@ -1,15 +1,37 @@
-# Build only the frontend application from this folder.
+# ---------- Stage 1: build the frontend ----------
 FROM node:22-bookworm-slim AS build
+
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+
+# Copy the lock file too, so every build installs the same package versions
+COPY package.json package-lock.json ./
+RUN npm ci
+
 COPY . .
 RUN npm run build
 
-# Small runtime image: Nginx serves the compiled static site.
-FROM nginx:1.28-alpine
+
+# ---------- Stage 2: serve with Alpine's own patched nginx, without root ----------
+FROM alpine:3.23
+
+
+RUN apk update \
+    && apk upgrade --no-cache \
+    && apk add --no-cache 'nginx=1.28.3-r7' \
+    && rm -f /etc/nginx/http.d/default.conf \
+    && apk info -v nginx
+
+COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY sbt-logo.png /usr/share/nginx/html/sbt-logo.png
-EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+
+# Run as a non-root user
+USER nginx
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
+
+CMD ["nginx", "-e", "/dev/stderr", "-g", "daemon off;"]

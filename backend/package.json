@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx server.ts --prod",
     "dev": "tsx watch server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
