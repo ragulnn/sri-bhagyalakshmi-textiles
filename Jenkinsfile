@@ -4,7 +4,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 20, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
 
@@ -31,7 +31,8 @@ pipeline {
                     set -eu
 
                     docker compose -p sbt-ci-test \
-                        -f compose.test.yaml up --build -d --wait
+                        -f compose.test.yaml up \
+                        --build -d --wait
 
                     npm --prefix backend run test:integration
                 '''
@@ -47,11 +48,32 @@ pipeline {
                 }
             }
         }
+
         stage('Frontend CI') {
             steps {
                 dir('frontend') {
                     sh 'npm ci'
                     sh 'npm run build'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def scannerHome = tool 'SonarScanner'
+
+                    withSonarQubeEnv('Local-SonarQube') {
+                        sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                              -Dsonar.projectKey=sri-bhagyalakshmi-textiles \
+                              -Dsonar.projectName='Sri Bhagyalakshmi Textiles' \
+                              -Dsonar.sources=backend/src,frontend/src \
+                              -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/coverage/**" \
+                              -Dsonar.sourceEncoding=UTF-8 \
+                              -Dsonar.qualitygate.wait=true
+                        """
+                    }
                 }
             }
         }

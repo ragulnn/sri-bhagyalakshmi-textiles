@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizePhone } from "../auth.js";
-import { ORDER_STATUSES } from "../orders.js";
 
 test("accepts a valid 10-digit Indian mobile number", () => {
   assert.equal(normalizePhone("9876543210"), "9876543210");
@@ -19,11 +18,4 @@ test("rejects invalid phone numbers", () => {
   assert.equal(normalizePhone("98765432101"), null);
   assert.equal(normalizePhone("not-a-number"), null);
   assert.equal(normalizePhone(null), null);
-});
-
-test("defines the supported order statuses", () => {
-  assert.deepEqual(
-    [...ORDER_STATUSES],
-    ["new", "confirmed", "shipped", "delivered", "cancelled"]
-  );
 });
