@@ -72,6 +72,20 @@ pipeline {
                 }
             }
         }
+
+        stage('Security Scanning - npm audit') {
+            steps {
+                dir('backend') {
+                    sh 'npm ci'
+                    sh 'npm audit --audit-level=high'
+                }
+
+                dir('frontend') {
+                    sh 'npm ci'
+                    sh 'npm audit --audit-level=high'
+                }
+            }
+        }
     }
 
     post {
