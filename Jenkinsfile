@@ -139,7 +139,7 @@ pipeline {
                 '''
             }
         }
-    }
+    
     
     stage('Push Images to Private Docker Hub') {
         steps {
@@ -173,7 +173,8 @@ pipeline {
             }
         }
     }
-    post {
+  }
+  post {
         success {
             archiveArtifacts(
                 artifacts: 'frontend/dist/**',
