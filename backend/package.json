@@ -7,7 +7,8 @@
     "start": "tsx server.ts --prod",
     "dev": "tsx watch server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --test tests/integration.test.mjs"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

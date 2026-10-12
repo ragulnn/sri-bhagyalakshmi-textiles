@@ -1,0 +1,50 @@
+name: sbt-ci-test
+
+services:
+  database-test:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ci_test_db
+      POSTGRES_USER: ci_test_user
+      POSTGRES_PASSWORD: ci_test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ci_test_user -d ci_test_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks:
+      - test-network
+
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATA_DIR: /tmp/sbt-ci-data
+      DATABASE_URL: postgres://ci_test_user:ci_test_password@database-test:5432/ci_test_db
+      ADMIN_PASSWORD: integration-test-admin-password
+      TRUST_PROXY: "1"
+    command: ["node", "--import", "tsx", "server.ts", "--prod"]
+    ports:
+      - "127.0.0.1:13000:3000"
+    depends_on:
+      database-test:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 20s
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

@@ -25,6 +25,28 @@ pipeline {
             }
         }
 
+        stage('API Integration Tests') {
+            steps {
+                sh '''
+                    set -eu
+
+                    docker compose -p sbt-ci-test \
+                        -f compose.test.yaml up --build -d --wait
+
+                    npm --prefix backend run test:integration
+                '''
+            }
+
+            post {
+                always {
+                    sh '''
+                        docker compose -p sbt-ci-test \
+                            -f compose.test.yaml down \
+                            --volumes --remove-orphans
+                    '''
+                }
+            }
+        }
         stage('Frontend CI') {
             steps {
                 dir('frontend') {
