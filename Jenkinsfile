@@ -1,11 +1,15 @@
-
 pipeline {
     agent any
 
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
         disableConcurrentBuilds()
+    }
+
+    environment {
+        BACKEND_IMAGE = 'sri-bhagyalakshmi-textiles-backend'
+        FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
     }
 
     stages {
@@ -98,6 +102,42 @@ pipeline {
                 '''
             }
         }
+
+        stage('Build Production Docker Images') {
+            steps {
+                sh '''
+                    set -eu
+
+                    docker build \
+                        -t "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
+                        -t "${BACKEND_IMAGE}:latest" \
+                        ./backend
+
+                    docker build \
+                        -t "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
+                        -t "${FRONTEND_IMAGE}:latest" \
+                        ./frontend
+                '''
+            }
+        }
+
+        stage('Trivy Image Vulnerability Scan') {
+            steps {
+                sh '''
+                    set -eu
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        "${BACKEND_IMAGE}:${BUILD_NUMBER}"
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}"
+                '''
+            }
+        }
     }
 
     post {
@@ -106,6 +146,12 @@ pipeline {
                 artifacts: 'frontend/dist/**',
                 fingerprint: true
             )
+
+            echo 'CI passed: tests, code quality, dependency security, secret scanning, Docker builds, and Trivy image scans.'
+        }
+
+        failure {
+            echo 'CI failed. Review the failed stage before publishing or deploying images.'
         }
 
         always {
