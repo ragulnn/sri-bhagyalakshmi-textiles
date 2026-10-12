@@ -88,6 +88,20 @@ pipeline {
         }
     }
 
+        
+        stage('Gitleaks Secret Scanning') {
+            steps {
+                sh '''
+                    set -eu
+                    gitleaks detect \
+                        --source . \
+                        --redact \
+                        --exit-code 1
+                '''
+            }
+        }
+
+
     post {
         success {
             archiveArtifacts(
