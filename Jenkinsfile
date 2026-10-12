@@ -68,7 +68,7 @@ pipeline {
                             ${scannerHome}/bin/sonar-scanner \
                               -Dsonar.projectKey=sri-bhagyalakshmi-textiles \
                               -Dsonar.projectName='Sri Bhagyalakshmi Textiles' \
-                              -Dsonar.sources=backend/src,frontend/src \
+                              -Dsonar.sources=backend,frontend/src
                               -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/coverage/**" \
                               -Dsonar.sourceEncoding=UTF-8 \
                               -Dsonar.qualitygate.wait=true
