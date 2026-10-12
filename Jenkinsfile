@@ -10,6 +10,7 @@ pipeline {
     environment {
         BACKEND_IMAGE = 'sri-bhagyalakshmi-textiles-backend'
         FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
+        DOCKERHUB_REPO = 'ragdocker812/sri-bhagyalakshmi-textiles'
     }
 
     stages {
@@ -139,7 +140,39 @@ pipeline {
             }
         }
     }
+    
+    stage('Push Images to Private Docker Hub') {
+        steps {
+            withCredentials([
+                usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_TOKEN'
+                )
+            ]) {
+                sh '''
+                    set -eu
 
+                    echo "$DOCKERHUB_TOKEN" | docker login \
+                        --username "$DOCKERHUB_USER" \
+                        --password-stdin
+
+                    trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+                    docker tag \
+                        "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
+                        "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
+
+                    docker tag \
+                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
+                        "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
+
+                    docker push "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
+                    docker push "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
+                '''
+            }
+        }
+    }
     post {
         success {
             archiveArtifacts(
