@@ -86,9 +86,7 @@ pipeline {
                 }
             }
         }
-    }
 
-        
         stage('Gitleaks Secret Scanning') {
             steps {
                 sh '''
@@ -100,7 +98,7 @@ pipeline {
                 '''
             }
         }
-
+    }
 
     post {
         success {
