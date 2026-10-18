@@ -240,7 +240,15 @@ export default function App() {
           setIsVideoModalOpen(true);
         }}
       />
-
+      {/* 6. CART DRAWER */}
+      <CartDrawer
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        items={cart}
+        onUpdateQuantity={handleUpdateQuantity}
+        onRemoveItem={handleRemoveFromCart}
+        onClearCart={handleClearCart}
+      />
       {/* 7. WISHLIST DRAWER */}
       <WishlistDrawer
         isOpen={isWishlistOpen}

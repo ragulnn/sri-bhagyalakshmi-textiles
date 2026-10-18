@@ -37,7 +37,32 @@ export interface ImageStore {
   open(name: string): Promise<StoredImage | null>;
 }
 
-export function createImageStore(uploadDir: string): ImageStore {
+export interface BlobContainerLike {
+  getBlockBlobClient(name: string): {
+    uploadData(data: Buffer, options: {
+      blobHTTPHeaders: {
+        blobContentType: string;
+        blobCacheControl: string;
+      };
+    }): Promise<unknown>;
+  };
+  getBlobClient(name: string): {
+    download(): Promise<{
+      readableStreamBody?: Readable | null;
+      contentLength?: number;
+      etag?: string;
+    }>;
+  };
+}
+
+export interface ImageStoreDependencies {
+  getContainerClient?: (account: string, containerName: string) => BlobContainerLike;
+}
+
+export function createImageStore(
+  uploadDir: string,
+  dependencies: ImageStoreDependencies = {}
+): ImageStore {
   const account = process.env.AZURE_STORAGE_ACCOUNT;
 
   if (!account) {
@@ -62,8 +87,12 @@ export function createImageStore(uploadDir: string): ImageStore {
   }
 
   const containerName = process.env.AZURE_STORAGE_CONTAINER || 'product-images';
-  const service = new BlobServiceClient(`https://${account}.blob.core.windows.net`, new DefaultAzureCredential());
-  const container = service.getContainerClient(containerName);
+  const container = dependencies.getContainerClient
+    ? dependencies.getContainerClient(account, containerName)
+    : new BlobServiceClient(
+        `https://${account}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      ).getContainerClient(containerName);
 
   return {
     kind: 'azure-blob',
