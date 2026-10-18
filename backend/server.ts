@@ -8,6 +8,7 @@ import { CATEGORIES, SAREES_DATA } from './seed/sareesData.js';
 import { setupAuth } from './auth.js';
 import { setupOrders } from './orders.js';
 import { generateSecret, otpauthUri, verifyTotp } from './twofa.js';
+import { createImageStore, IMAGE_NAME } from './storage.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.argv.includes('--prod');
@@ -26,7 +27,8 @@ if (IS_PROD) {
   }
 }
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const imageStore = createImageStore(UPLOAD_DIR);
+console.log(`Image storage: ${imageStore.kind}`);
 
 /* ---------- storage: PostgreSQL ---------- */
 type AnyObj = Record<string, any>;
@@ -371,7 +373,7 @@ async function main() {
     '/api/admin/upload',
     requireAdmin,
     express.raw({ type: 'image/*', limit: '12mb' }),
-    (req, res) => {
+    async (req, res) => {
       const buf = req.body as Buffer;
       if (!Buffer.isBuffer(buf) || buf.length < 12) return res.status(400).json({ error: 'No image received.' });
       let ext = '';
@@ -381,7 +383,12 @@ async function main() {
       else if (buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') ext = 'webp';
       if (!ext) return res.status(400).json({ error: 'Only JPG, PNG, GIF or WEBP images are allowed.' });
       const name = `${crypto.randomBytes(12).toString('hex')}.${ext}`;
-      fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+      try {
+        await imageStore.save(name, buf);
+      } catch (error) {
+        console.error('Image upload failed:', error);
+        return res.status(500).json({ error: 'Could not save the image. Please try again.' });
+      }
       res.json({ url: `/uploads/${name}` });
     }
   );
@@ -391,20 +398,30 @@ async function main() {
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
-  app.use(
-    '/uploads',
-    express.static(UPLOAD_DIR, {
-      maxAge: '30d',
-      immutable: true,
-      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff')
-    })
-  );
+  app.get('/uploads/:name', async (req, res, next) => {
+    const name = req.params.name;
+    if (!IMAGE_NAME.test(name)) return res.status(404).end();
+    try {
+      const img = await imageStore.open(name);
+      if (!img) return res.status(404).end();
+      res.setHeader('Content-Type', img.contentType);
+      if (img.size !== undefined) res.setHeader('Content-Length', String(img.size));
+      if (img.etag) res.setHeader('ETag', img.etag);
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      img.stream.on('error', (e) => { console.error('Image stream failed:', e); res.destroy(); });
+      img.stream.pipe(res);
+    } catch (e) {
+      next(e);
+    }
+  });
 
   // The frontend is served by the dedicated Nginx container.
   // This service only handles API routes and uploaded media.
 
   // Never leak stack traces or internals
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error('Request failed:', req.method, req.path, err);
     if (res.headersSent) return next(err);
     const status = err?.status || err?.statusCode || 500;
     res.status(status).json({ error: status === 413 ? 'Too large.' : status < 500 ? 'Bad request.' : 'Server error.' });
