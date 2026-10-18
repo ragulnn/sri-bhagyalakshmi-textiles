@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -90,7 +91,7 @@ pipeline {
                         sh """
                             set -eu
 
-                            "\${scannerHome}/bin/sonar-scanner" \
+                            "${scannerHome}/bin/sonar-scanner" \
                                 '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
                                 '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
                                 '-Dsonar.sources=backend,frontend/src' \
@@ -208,7 +209,7 @@ pipeline {
                 fingerprint: true
             )
 
-            echo 'CI passed: tests, coverage generation, code quality, dependency security, secret scanning, Docker builds, and Trivy image scans.'
+            echo 'CI passed: tests, coverage, code quality, dependency security, secret scanning, Docker builds, and image vulnerability scans.'
         }
 
         failure {
@@ -220,3 +221,4 @@ pipeline {
         }
     }
 }
+
