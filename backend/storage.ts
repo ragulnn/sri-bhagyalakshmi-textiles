@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import type { Readable } from 'stream';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Readable } from 'node:stream';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { DefaultAzureCredential } from '@azure/identity';
 
