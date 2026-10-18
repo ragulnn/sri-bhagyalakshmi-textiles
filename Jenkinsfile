@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -6,6 +5,7 @@ pipeline {
         timestamps()
         timeout(time: 45, unit: 'MINUTES')
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
     }
 
     environment {
@@ -95,7 +95,9 @@ pipeline {
                                 '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
                                 '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
                                 '-Dsonar.sources=backend,frontend/src' \
-                                '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**' \
+                                '-Dsonar.tests=backend/tests' \
+                                '-Dsonar.test.inclusions=backend/tests/**/*.test.ts,backend/tests/**/*.test.mjs' \
+                                '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**,backend/tests/**' \
                                 '-Dsonar.sourceEncoding=UTF-8' \
                                 '-Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info' \
                                 '-Dsonar.qualitygate.wait=true'
@@ -221,4 +223,3 @@ pipeline {
         }
     }
 }
-
