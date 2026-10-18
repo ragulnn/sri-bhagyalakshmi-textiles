@@ -30,6 +30,24 @@ pipeline {
             }
         }
 
+        stage('Backend Coverage') {
+            steps {
+                dir('backend') {
+                    sh '''
+                        set -eu
+
+                        npx c8 \
+                            --reporter=text \
+                            --reporter=lcov \
+                            --reports-dir=coverage \
+                            node --import tsx --test tests/*.test.ts
+
+                        test -s coverage/lcov.info
+                    '''
+                }
+            }
+        }
+
         stage('API Integration Tests') {
             steps {
                 sh '''
@@ -71,7 +89,15 @@ pipeline {
                     withSonarQubeEnv('Local-SonarQube') {
                         sh """
                             set -eu
-                            "${scannerHome}/bin/sonar-scanner" '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' '-Dsonar.sources=backend,frontend/src' '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**' '-Dsonar.sourceEncoding=UTF-8' '-Dsonar.qualitygate.wait=true'
+
+                            "\${scannerHome}/bin/sonar-scanner" \
+                                '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
+                                '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
+                                '-Dsonar.sources=backend,frontend/src' \
+                                '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**' \
+                                '-Dsonar.sourceEncoding=UTF-8' \
+                                '-Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info' \
+                                '-Dsonar.qualitygate.wait=true'
                         """
                     }
                 }
@@ -96,6 +122,7 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+
                     gitleaks detect \
                         --source . \
                         --redact \
@@ -139,49 +166,49 @@ pipeline {
                 '''
             }
         }
-    
-    
-    stage('Push Images to Private Docker Hub') {
-        steps {
-            withCredentials([
-                usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'DOCKERHUB_USER',
-                    passwordVariable: 'DOCKERHUB_TOKEN'
-                )
-            ]) {
-                sh '''
-                    set -eu
 
-                    echo "$DOCKERHUB_TOKEN" | docker login \
-                        --username "$DOCKERHUB_USER" \
-                        --password-stdin
+        stage('Push Images to Private Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
 
-                    trap 'docker logout >/dev/null 2>&1 || true' EXIT
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                            --username "$DOCKERHUB_USER" \
+                            --password-stdin
 
-                    docker tag \
-                        "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
-                        "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
 
-                    docker tag \
-                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
-                        "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
+                        docker tag \
+                            "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
+                            "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
 
-                    docker push "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
-                    docker push "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
-                '''
+                        docker tag \
+                            "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
+                            "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
+
+                        docker push "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
+                        docker push "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
+                    '''
+                }
             }
         }
     }
-  }
-  post {
+
+    post {
         success {
             archiveArtifacts(
                 artifacts: 'frontend/dist/**',
                 fingerprint: true
             )
 
-            echo 'CI passed: tests, code quality, dependency security, secret scanning, Docker builds, and Trivy image scans.'
+            echo 'CI passed: tests, coverage generation, code quality, dependency security, secret scanning, Docker builds, and Trivy image scans.'
         }
 
         failure {
