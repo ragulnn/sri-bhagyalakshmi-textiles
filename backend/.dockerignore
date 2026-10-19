@@ -1,4 +1,8 @@
 node_modules
-.env
-data
+coverage
+coverage/**
+.nyc_output
 *.log
+.env
+.env.*
+!.env.example
