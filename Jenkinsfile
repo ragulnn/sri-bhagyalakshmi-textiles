@@ -172,6 +172,7 @@ pipeline {
 
                     gitleaks detect \
                         --source . \
+                        --config .gitleaks.toml \
                         --redact \
                         --exit-code 1
                 '''
