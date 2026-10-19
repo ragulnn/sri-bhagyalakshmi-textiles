@@ -81,64 +81,47 @@ describe('SearchModal', () => {
     expect(screen.queryByText('No sarees found.')).not.toBeInTheDocument();
   });
 
-  it('finds sarees by name without case sensitivity', () => {
+  it.each([
+    {
+      description: 'finds sarees by name without case sensitivity',
+      query: 'kanchipuram',
+      visible: 'Kanchipuram Silk Saree',
+      hidden: 'Cotton Daily Wear Saree',
+    },
+    {
+      description: 'finds sarees by SKU',
+      query: 'SBT-002',
+      visible: 'Cotton Daily Wear Saree',
+      hidden: 'Kanchipuram Silk Saree',
+    },
+    {
+      description: 'finds sarees by category',
+      query: 'cotton',
+      visible: 'Cotton Daily Wear Saree',
+      hidden: 'Kanchipuram Silk Saree',
+    },
+    {
+      description: 'finds sarees by colour',
+      query: 'blue',
+      visible: 'Cotton Daily Wear Saree',
+      hidden: 'Kanchipuram Silk Saree',
+    },
+    {
+      description: 'trims whitespace from the search query',
+      query: '  SBT-001  ',
+      visible: 'Kanchipuram Silk Saree',
+      hidden: 'Cotton Daily Wear Saree',
+    },
+  ])('$description', ({ query, visible, hidden }) => {
     render(<SearchModal {...createProps()} />);
 
     fireEvent.change(
       screen.getByPlaceholderText('Search by name, code or colour'),
-      { target: { value: 'kanchipuram' } },
+      { target: { value: query } },
     );
 
-    expect(screen.getByText('Kanchipuram Silk Saree')).toBeInTheDocument();
-    expect(screen.queryByText('Cotton Daily Wear Saree')).not.toBeInTheDocument();
-  });
-
-  it('finds sarees by SKU', () => {
-    render(<SearchModal {...createProps()} />);
-
-    fireEvent.change(
-      screen.getByPlaceholderText('Search by name, code or colour'),
-      { target: { value: 'SBT-002' } },
-    );
-
-    expect(screen.getByText('Cotton Daily Wear Saree')).toBeInTheDocument();
-    expect(screen.queryByText('Kanchipuram Silk Saree')).not.toBeInTheDocument();
-  });
-
-  it('finds sarees by category', () => {
-    render(<SearchModal {...createProps()} />);
-
-    fireEvent.change(
-      screen.getByPlaceholderText('Search by name, code or colour'),
-      { target: { value: 'cotton' } },
-    );
-
-    expect(screen.getByText('Cotton Daily Wear Saree')).toBeInTheDocument();
-    expect(screen.queryByText('Kanchipuram Silk Saree')).not.toBeInTheDocument();
-  });
-
-  it('finds sarees by colour', () => {
-    render(<SearchModal {...createProps()} />);
-
-    fireEvent.change(
-      screen.getByPlaceholderText('Search by name, code or colour'),
-      { target: { value: 'blue' } },
-    );
-
-    expect(screen.getByText('Cotton Daily Wear Saree')).toBeInTheDocument();
-    expect(screen.queryByText('Kanchipuram Silk Saree')).not.toBeInTheDocument();
-  });
-
-  it('trims whitespace from the search query', () => {
-    render(<SearchModal {...createProps()} />);
-
-    fireEvent.change(
-      screen.getByPlaceholderText('Search by name, code or colour'),
-      { target: { value: '  SBT-001  ' } },
-    );
-
-    expect(screen.getByText('Kanchipuram Silk Saree')).toBeInTheDocument();
-    expect(screen.queryByText('No sarees found.')).not.toBeInTheDocument();
+    expect(screen.getByText(visible)).toBeInTheDocument();
+    expect(screen.queryByText(hidden)).not.toBeInTheDocument();
   });
 
   it('shows a message when no sarees match the query', () => {
@@ -199,7 +182,9 @@ describe('SearchModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(props.onClose).toHaveBeenCalledOnce();
-    expect(screen.queryByText('Kanchipuram Silk Saree')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Kanchipuram Silk Saree'),
+    ).not.toBeInTheDocument();
   });
 
   it('closes when the backdrop is clicked', () => {
