@@ -149,17 +149,75 @@ pipeline {
 
         stage('Security Scanning - npm audit') {
             steps {
+                // Retry temporary registry/DNS failures without hiding real vulnerabilities.
                 dir('backend') {
                     sh '''
                         set -eu
-                        npm audit --audit-level=high
+                        attempt=1
+                        max_attempts=3
+
+                        while [ "$attempt" -le "$max_attempts" ]; do
+                            audit_log="$(mktemp)"
+                            set +e
+                            npm audit --audit-level=high \\
+                                --fetch-retries=3 \\
+                                --fetch-retry-mintimeout=10000 \\
+                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
+                            audit_status=$?
+                            cat "$audit_log"
+                            set -e
+
+                            if [ "$audit_status" -eq 0 ]; then
+                                rm -f "$audit_log"
+                                exit 0
+                            fi
+
+                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \
+                                && [ "$attempt" -lt "$max_attempts" ]; then
+                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
+                                rm -f "$audit_log"
+                                sleep 10
+                                attempt=$((attempt + 1))
+                            else
+                                rm -f "$audit_log"
+                                exit "$audit_status"
+                            fi
+                        done
                     '''
                 }
 
                 dir('frontend') {
                     sh '''
                         set -eu
-                        npm audit --audit-level=high
+                        attempt=1
+                        max_attempts=3
+
+                        while [ "$attempt" -le "$max_attempts" ]; do
+                            audit_log="$(mktemp)"
+                            set +e
+                            npm audit --audit-level=high \\
+                                --fetch-retries=3 \\
+                                --fetch-retry-mintimeout=10000 \\
+                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
+                            audit_status=$?
+                            cat "$audit_log"
+                            set -e
+
+                            if [ "$audit_status" -eq 0 ]; then
+                                rm -f "$audit_log"
+                                exit 0
+                            fi
+
+                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \\\n                                && [ "$attempt" -lt "$max_attempts" ]; then
+                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
+                                rm -f "$audit_log"
+                                sleep 10
+                                attempt=$((attempt + 1))
+                            else
+                                rm -f "$audit_log"
+                                exit "$audit_status"
+                            fi
+                        done
                     '''
                 }
             }
