@@ -4,339 +4,185 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 45, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
         skipDefaultCheckout(true)
     }
 
     environment {
-        BACKEND_IMAGE = 'sri-bhagyalakshmi-textiles-backend'
-        FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
-        DOCKERHUB_REPO = 'ragdocker812/sri-bhagyalakshmi-textiles'
+        ARTIFACT_REPO = 'https://github.com/ragulnn/sbt-ci-artifacts.git'
+        REPORT_DIR = 'reports'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-            }
-        }
 
-        stage('Backend CI') {
-            steps {
-                dir('backend') {
-                    sh '''
-                        set -eu
-                        npm ci
-                        npm run typecheck
-                        npm test
-                    '''
-                }
-            }
-        }
-
-        stage('Backend Coverage') {
-            steps {
-                dir('backend') {
-                    sh '''
-                        set -eu
-
-                        npx c8 \
-                            --reporter=text \
-                            --reporter=lcov \
-                            --reports-dir=coverage \
-                            node --import tsx --test tests/*.test.ts
-
-                        test -s coverage/lcov.info
-                    '''
-                }
-
-                archiveArtifacts(
-                    artifacts: 'backend/coverage/lcov.info',
-                    fingerprint: true
-                )
-            }
-        }
-
-        stage('API Integration Tests') {
-            steps {
                 sh '''
-                    set -eu
-
-                    docker compose -p sbt-ci-test \
-                        -f compose.test.yaml up \
-                        --build -d --wait
-
-                    npm --prefix backend run test:integration
-                '''
-            }
-
-            post {
-                always {
-                    sh '''
-                        docker compose -p sbt-ci-test \
-                            -f compose.test.yaml down \
-                            --volumes --remove-orphans
-                    '''
-                }
-            }
-        }
-
-        stage('Frontend CI & Coverage') {
-            steps {
-                dir('frontend') {
-                    sh '''
-                        set -eu
-
-                        npm ci
-                        npm run build
-                        npm run test:coverage
-
-                        test -s coverage/lcov.info
-                    '''
-                }
-
-                archiveArtifacts(
-                    artifacts: 'frontend/coverage/lcov.info',
-                    fingerprint: true
-                )
-            }
-        }
-
-        stage('Verify Coverage Reports') {
-            steps {
-                sh '''
-                    set -eu
-
-                    echo "Checking backend coverage..."
-                    test -s backend/coverage/lcov.info
-
-                    echo "Checking frontend coverage..."
-                    test -s frontend/coverage/lcov.info
-
-                    echo "Both LCOV reports are available."
-                    wc -l \
-                        backend/coverage/lcov.info \
-                        frontend/coverage/lcov.info
+                    mkdir -p reports/sonarqube
+                    mkdir -p reports/metadata
+                    echo "Jenkins report publishing test started." \
+                        > reports/metadata/test-run.txt
                 '''
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('SonarQube Analysis - Intentional Failure Test') {
             steps {
                 script {
                     def scannerHome = tool 'SonarScanner'
+                    int scanStatus
 
                     withSonarQubeEnv('Local-SonarQube') {
-                        sh """
-                            set -eu
-
-                            "${scannerHome}/bin/sonar-scanner" \
-                                '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
-                                '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
-                                '-Dsonar.sources=backend,frontend/src' \
-                                '-Dsonar.tests=backend/tests,frontend/src' \
-                                '-Dsonar.test.inclusions=backend/tests/**/*.test.ts,backend/tests/**/*.test.mjs,frontend/src/**/*.test.ts,frontend/src/**/*.test.tsx' \
-                                '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**,backend/tests/**,**/*.test.ts,**/*.test.tsx,**/*.test.mjs' \
-                                '-Dsonar.sourceEncoding=UTF-8' \
-                                '-Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info,frontend/coverage/lcov.info' \
-                                '-Dsonar.qualitygate.wait=true'
-                        """
+                        scanStatus = sh(
+                            returnStatus: true,
+                            script: """
+                                set +e
+                                "${scannerHome}/bin/sonar-scanner" \
+                                    '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
+                                    '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
+                                    '-Dsonar.sources=backend,frontend/src' \
+                                    '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**' \
+                                    '-Dsonar.sourceEncoding=UTF-8' \
+                                    '-Dsonar.qualitygate.wait=true' \
+                                    > reports/sonarqube/scanner.log 2>&1
+                                result=\\$?
+                                cat reports/sonarqube/scanner.log
+                                exit \\$result
+                            """
+                        )
                     }
-                }
-            }
-        }
 
-        stage('Security Scanning - npm audit') {
-            steps {
-                // Retry temporary registry/DNS failures without hiding real vulnerabilities.
-                dir('backend') {
-                    sh '''
-                        set -eu
-                        attempt=1
-                        max_attempts=3
-
-                        while [ "$attempt" -le "$max_attempts" ]; do
-                            audit_log="$(mktemp)"
-                            set +e
-                            npm audit --audit-level=high \\
-                                --fetch-retries=3 \\
-                                --fetch-retry-mintimeout=10000 \\
-                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
-                            audit_status=$?
-                            cat "$audit_log"
-                            set -e
-
-                            if [ "$audit_status" -eq 0 ]; then
-                                rm -f "$audit_log"
-                                exit 0
-                            fi
-
-                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \
-                                && [ "$attempt" -lt "$max_attempts" ]; then
-                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
-                                rm -f "$audit_log"
-                                sleep 10
-                                attempt=$((attempt + 1))
-                            else
-                                rm -f "$audit_log"
-                                exit "$audit_status"
-                            fi
-                        done
-                    '''
-                }
-
-                dir('frontend') {
-                    sh '''
-                        set -eu
-                        attempt=1
-                        max_attempts=3
-
-                        while [ "$attempt" -le "$max_attempts" ]; do
-                            audit_log="$(mktemp)"
-                            set +e
-                            npm audit --audit-level=high \\
-                                --fetch-retries=3 \\
-                                --fetch-retry-mintimeout=10000 \\
-                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
-                            audit_status=$?
-                            cat "$audit_log"
-                            set -e
-
-                            if [ "$audit_status" -eq 0 ]; then
-                                rm -f "$audit_log"
-                                exit 0
-                            fi
-
-                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \\\n                                && [ "$attempt" -lt "$max_attempts" ]; then
-                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
-                                rm -f "$audit_log"
-                                sleep 10
-                                attempt=$((attempt + 1))
-                            else
-                                rm -f "$audit_log"
-                                exit "$audit_status"
-                            fi
-                        done
-                    '''
-                }
-            }
-        }
-
-        stage('Gitleaks Secret Scanning') {
-            steps {
-                sh '''
-                    set -eu
-
-                    gitleaks detect \
-                        --source . \
-                        --config .gitleaks.toml \
-                        --redact \
-                        --exit-code 1
-                '''
-            }
-        }
-
-        stage('Build Production Docker Images') {
-            steps {
-                sh '''
-                    set -eu
-
-                    docker build \
-                        -t "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
-                        -t "${BACKEND_IMAGE}:latest" \
-                        ./backend
-
-                    docker build \
-                        -t "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
-                        -t "${FRONTEND_IMAGE}:latest" \
-                        ./frontend
-                '''
-            }
-        }
-
-        stage('Trivy Image Vulnerability Scan') {
-            steps {
-                sh '''
-                    set -eu
-
-                    trivy image \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        "${BACKEND_IMAGE}:${BUILD_NUMBER}"
-
-                    trivy image \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}"
-                '''
-            }
-        }
-
-        stage('Push Images to Private Docker Hub') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKERHUB_USER',
-                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    writeFile(
+                        file: 'reports/sonarqube/scanner-exit-code.txt',
+                        text: "${scanStatus}\\n"
                     )
-                ]) {
-                    sh '''
-                        set -eu
 
-                        echo "$DOCKERHUB_TOKEN" | docker login \
-                            --username "$DOCKERHUB_USER" \
-                            --password-stdin
+                    if (fileExists('.scannerwork/report-task.txt')) {
+                        sh '''
+                            cp .scannerwork/report-task.txt \
+                                reports/sonarqube/report-task.txt
+                        '''
+                    }
 
-                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+                    if (scanStatus != 0) {
+                        error(
+                            "SonarQube failed with exit code ${scanStatus}. " +
+                            "Testing report publishing after a real scan failure."
+                        )
+                    }
 
-                        docker tag \
-                            "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
-                            "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
-
-                        docker tag \
-                            "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
-                            "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
-
-                        docker push "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
-                        docker push "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
-                    '''
+                    // TEST ONLY: deliberately fail after successful analysis.
+                    error(
+                        'INTENTIONAL TEST FAILURE: verifying report publishing ' +
+                        'after the SonarQube stage fails.'
+                    )
                 }
             }
         }
     }
 
     post {
-        success {
-            archiveArtifacts(
-                artifacts: 'frontend/dist/**',
-                fingerprint: true
-            )
+        always {
+            script {
+                echo 'Collecting reports before the Jenkins agent is released.'
 
-            echo '''
-                CI passed:
-                - Backend type checking and tests
-                - Backend coverage
-                - API integration tests
-                - Frontend build, tests, and coverage
-                - SonarQube quality gate
-                - Dependency security scanning
-                - Secret scanning
-                - Docker image builds and vulnerability scans
-                - Docker Hub image publishing
-            '''
+                sh '''
+                    mkdir -p reports/metadata
+
+                    cat > reports/metadata/build-info.txt <<EOF
+JOB_NAME=${JOB_NAME}
+BUILD_NUMBER=${BUILD_NUMBER}
+BUILD_URL=${BUILD_URL}
+GIT_COMMIT=${GIT_COMMIT:-unknown}
+BUILD_RESULT=${currentBuildResult:-not-finalized}
+EOF
+                '''
+
+                // Preserve reports in Jenkins first.
+                archiveArtifacts(
+                    artifacts: 'reports/**',
+                    allowEmptyArchive: true,
+                    fingerprint: true
+                )
+
+                // Then attempt the GitHub push, even after stage failure.
+                try {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'github-pat',
+                            usernameVariable: 'GITHUB_USER',
+                            passwordVariable: 'GITHUB_TOKEN'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+
+                            export GIT_TERMINAL_PROMPT=0
+
+                            ASKPASS="$WORKSPACE/.git-askpass-ci"
+                            REPO_DIR="$WORKSPACE/.ci-artifact-repo"
+
+                            trap 'rm -f "$ASKPASS"' EXIT
+
+                            cat > "$ASKPASS" <<'ASKPASS_EOF'
+#!/bin/sh
+case "$1" in
+    *Username*) printf '%s\\n' "$GITHUB_USER" ;;
+    *Password*) printf '%s\\n' "$GITHUB_TOKEN" ;;
+    *) exit 1 ;;
+esac
+ASKPASS_EOF
+
+                            chmod 700 "$ASKPASS"
+                            export GIT_ASKPASS="$ASKPASS"
+
+                            rm -rf "$REPO_DIR"
+                            git clone "$ARTIFACT_REPO" "$REPO_DIR"
+
+                            cd "$REPO_DIR"
+
+                            # Preserve reports under a unique build directory.
+                            DEST="builds/${BUILD_NUMBER}"
+                            mkdir -p "$DEST"
+                            cp -R "$WORKSPACE/reports/." "$DEST/"
+
+                            git config user.name "Jenkins CI"
+                            git config user.email \
+                                "jenkins-ci@users.noreply.github.com"
+
+                            git add "$DEST"
+
+                            if git diff --cached --quiet; then
+                                echo "No new report files to commit."
+                                exit 0
+                            fi
+
+                            git commit -m \
+                                "CI reports for build ${BUILD_NUMBER}"
+
+                            git push origin HEAD:main
+
+                            echo "REPORT_PUSH_SUCCESS"
+                        '''
+                    }
+
+                    echo 'GitHub report publication completed.'
+                } catch (Exception ex) {
+                    echo "REPORT_PUSH_FAILED: ${ex}"
+                    currentBuild.description =
+                        'Report publication failed; check console log'
+                }
+            }
+        }
+
+        success {
+            echo 'Unexpected success: the intentional failure was not triggered.'
         }
 
         failure {
-            echo '''
-                CI failed. Review the failed stage and fix the underlying
-                issue before publishing or deploying images.
-            '''
-        }
-
-        always {
-            echo 'CI pipeline finished. Review the stage results above.'
+            echo 'Expected test result: pipeline failed at the SonarQube stage.'
         }
     }
 }
