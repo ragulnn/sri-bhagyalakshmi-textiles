@@ -14,7 +14,6 @@ pipeline {
         FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
         DOCKERHUB_REPO = 'ragdocker812/sri-bhagyalakshmi-textiles'
         ARTIFACT_REPO = 'https://github.com/ragulnn/sbt-ci-artifacts.git'
-        REPORT_DIR = 'reports'
     }
 
     stages {
@@ -38,31 +37,11 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        set +e
+                        set -eu
 
                         npm ci > ../reports/test-results/backend-install.log 2>&1
-                        install_status=$?
-
-                        if [ "$install_status" -eq 0 ]; then
-                            npm run typecheck > ../reports/test-results/backend-typecheck.log 2>&1
-                            typecheck_status=$?
-
-                            npm test > ../reports/test-results/backend-test.log 2>&1
-                            test_status=$?
-                        else
-                            typecheck_status=1
-                            test_status=1
-                        fi
-
-                        printf 'install=%s\\ntypecheck=%s\\ntest=%s\\n' \
-                            "$install_status" "$typecheck_status" "$test_status" \
-                            > ../reports/test-results/backend-status.txt
-
-                        if [ "$install_status" -ne 0 ] || \
-                           [ "$typecheck_status" -ne 0 ] || \
-                           [ "$test_status" -ne 0 ]; then
-                            exit 1
-                        fi
+                        npm run typecheck > ../reports/test-results/backend-typecheck.log 2>&1
+                        npm test > ../reports/test-results/backend-test.log 2>&1
                     '''
                 }
             }
@@ -72,7 +51,7 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        set +e
+                        set -eu
 
                         npx c8 \
                             --reporter=text \
@@ -81,14 +60,10 @@ pipeline {
                             node --import tsx --test tests/*.test.ts \
                             > ../reports/test-results/backend-coverage.log 2>&1
 
-                        result=$?
+                        test -s coverage/lcov.info
 
-                        if [ -d coverage ]; then
-                            cp -R coverage ../reports/coverage/backend
-                        fi
-
-                        echo "$result" > ../reports/coverage/backend-exit-code.txt
-                        exit "$result"
+                        mkdir -p ../reports/coverage/backend
+                        cp -R coverage/. ../reports/coverage/backend/
                     '''
                 }
             }
@@ -110,12 +85,10 @@ pipeline {
 
                         dir('backend') {
                             sh '''
-                                set +e
+                                set -eu
+
                                 npm run test:integration \
                                     > ../reports/test-results/api-integration.log 2>&1
-                                result=$?
-                                echo "$result" > ../reports/test-results/api-integration-exit-code.txt
-                                exit "$result"
                             '''
                         }
                     } finally {
@@ -140,35 +113,16 @@ pipeline {
             steps {
                 dir('frontend') {
                     sh '''
-                        set +e
+                        set -eu
 
                         npm ci > ../reports/test-results/frontend-install.log 2>&1
-                        install_status=$?
+                        npm run build > ../reports/test-results/frontend-build.log 2>&1
+                        npm run test:coverage > ../reports/test-results/frontend-coverage.log 2>&1
 
-                        if [ "$install_status" -eq 0 ]; then
-                            npm run build > ../reports/test-results/frontend-build.log 2>&1
-                            build_status=$?
+                        test -s coverage/lcov.info
 
-                            npm run test:coverage > ../reports/test-results/frontend-coverage.log 2>&1
-                            test_status=$?
-                        else
-                            build_status=1
-                            test_status=1
-                        fi
-
-                        if [ -d coverage ]; then
-                            cp -R coverage ../reports/coverage/frontend
-                        fi
-
-                        printf 'install=%s\\nbuild=%s\\ntest_coverage=%s\\n' \
-                            "$install_status" "$build_status" "$test_status" \
-                            > ../reports/test-results/frontend-status.txt
-
-                        if [ "$install_status" -ne 0 ] || \
-                           [ "$build_status" -ne 0 ] || \
-                           [ "$test_status" -ne 0 ]; then
-                            exit 1
-                        fi
+                        mkdir -p ../reports/coverage/frontend
+                        cp -R coverage/. ../reports/coverage/frontend/
                     '''
                 }
             }
@@ -179,14 +133,10 @@ pipeline {
                 sh '''
                     set -eu
 
-                    find reports/coverage -type f -print \
-                        > reports/coverage/files.txt
+                    test -s reports/coverage/backend/lcov.info
+                    test -s reports/coverage/frontend/lcov.info
 
-                    if [ ! -d reports/coverage/backend ] && \
-                       [ ! -d reports/coverage/frontend ]; then
-                        echo "No coverage output was found."
-                        exit 1
-                    fi
+                    echo "Backend and frontend coverage reports are available."
                 '''
             }
         }
@@ -197,86 +147,107 @@ pipeline {
                     def scannerHome = tool 'SonarScanner'
 
                     withSonarQubeEnv('Local-SonarQube') {
-                        sh '''
-                            set +e
+                        withEnv(["SONAR_SCANNER_PATH=${scannerHome}"]) {
+                            sh '''
+                                set +e
 
-                            "$SONAR_SCANNER_PATH/bin/sonar-scanner" \
-                                -Dsonar.projectKey=sri-bhagyalakshmi-textiles \
-                                -Dsonar.sources=backend,frontend \
-                                -Dsonar.qualitygate.wait=true \
-                                > reports/sonarqube/scanner.log 2>&1
+                                "$SONAR_SCANNER_PATH/bin/sonar-scanner" \
+                                    -Dsonar.projectKey=sri-bhagyalakshmi-textiles \
+                                    -Dsonar.projectName="Sri Bhagyalakshmi Textiles" \
+                                    -Dsonar.sources=backend,frontend/src \
+                                    -Dsonar.tests=backend/tests \
+                                    -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** \
+                                    -Dsonar.javascript.lcov.reportPaths=reports/coverage/backend/lcov.info,reports/coverage/frontend/lcov.info \
+                                    -Dsonar.qualitygate.wait=true \
+                                    > reports/sonarqube/scanner.log 2>&1
 
-                            result=$?
-                            echo "$result" > reports/sonarqube/scanner-exit-code.txt
-                            exit "$result"
-                        '''.replace(
-                            '$SONAR_SCANNER_PATH',
-                            "${scannerHome}"
-                        )
+                                result=$?
+                                echo "$result" > reports/sonarqube/scanner-exit-code.txt
+                                cat reports/sonarqube/scanner.log
+                                exit "$result"
+                            '''
+                        }
                     }
+
+                    sh '''
+                        if [ -f .scannerwork/report-task.txt ]; then
+                            cp .scannerwork/report-task.txt \
+                                reports/sonarqube/report-task.txt
+                        fi
+                    '''
                 }
             }
         }
 
         stage('Dependency Audit') {
             steps {
-                script {
-                    def auditStatus = 0
-
-                    dir('backend') {
-                        sh '''
-                            set +e
-                            npm audit --json \
-                                > ../reports/security/backend-npm-audit.json 2>&1
-                            echo "$?" > ../reports/security/backend-npm-audit-exit-code.txt
-                            exit 0
-                        '''
-                    }
-
-                    dir('frontend') {
-                        sh '''
-                            set +e
-                            npm audit --json \
-                                > ../reports/security/frontend-npm-audit.json 2>&1
-                            echo "$?" > ../reports/security/frontend-npm-audit-exit-code.txt
-                            exit 0
-                        '''
-                    }
-
+                dir('backend') {
                     sh '''
+                        set -eu
+
+                        set +e
+                        npm audit --json \
+                            > ../reports/security/backend-npm-audit.json 2>&1
+                        result=$?
+                        set -e
+
+                        echo "$result" > ../reports/security/backend-audit-exit-code.txt
+
                         python3 - <<'PY'
 import json
 from pathlib import Path
 
-failed = False
+path = Path("../reports/security/backend-npm-audit.json")
+try:
+    data = json.loads(path.read_text())
+except Exception as exc:
+    print(f"Could not parse backend audit report: {exc}")
+    raise SystemExit(1)
 
-for path in [
-    Path("reports/security/backend-npm-audit.json"),
-    Path("reports/security/frontend-npm-audit.json"),
-]:
-    try:
-        data = json.loads(path.read_text())
-        metadata = data.get("metadata", {}).get("vulnerabilities", {})
-        print(f"{path}: {metadata}")
-        if any(metadata.get(level, 0) for level in ("high", "critical")):
-            failed = True
-    except Exception as exc:
-        print(f"Could not parse {path}: {exc}")
-        failed = True
+v = data.get("metadata", {}).get("vulnerabilities", {})
+print("Backend audit:", v)
 
-Path("reports/security/audit-gate.txt").write_text(
-    "FAIL: high or critical vulnerabilities found, or report invalid\\n"
-    if failed else "PASS: no high or critical vulnerabilities reported\\n"
-)
+if v.get("high", 0) or v.get("critical", 0):
+    raise SystemExit(1)
+PY
+                    '''
+                }
 
-raise SystemExit(1 if failed else 0)
+                dir('frontend') {
+                    sh '''
+                        set -eu
+
+                        set +e
+                        npm audit --json \
+                            > ../reports/security/frontend-npm-audit.json 2>&1
+                        result=$?
+                        set -e
+
+                        echo "$result" > ../reports/security/frontend-audit-exit-code.txt
+
+                        python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("../reports/security/frontend-npm-audit.json")
+try:
+    data = json.loads(path.read_text())
+except Exception as exc:
+    print(f"Could not parse frontend audit report: {exc}")
+    raise SystemExit(1)
+
+v = data.get("metadata", {}).get("vulnerabilities", {})
+print("Frontend audit:", v)
+
+if v.get("high", 0) or v.get("critical", 0):
+    raise SystemExit(1)
 PY
                     '''
                 }
             }
         }
 
-        stage('Gitleaks Scan') {
+        stage('Gitleaks Secret Scanning') {
             steps {
                 sh '''
                     set +e
@@ -285,11 +256,13 @@ PY
                         --source . \
                         --report-format json \
                         --report-path reports/security/gitleaks.json \
+                        --redact \
                         --no-banner \
                         > reports/security/gitleaks.log 2>&1
 
                     result=$?
                     echo "$result" > reports/security/gitleaks-exit-code.txt
+                    cat reports/security/gitleaks.log
                     exit "$result"
                 '''
             }
@@ -317,7 +290,7 @@ PY
             }
         }
 
-        stage('Trivy Image Scans') {
+        stage('Trivy Image Vulnerability Scan') {
             steps {
                 sh '''
                     set +e
@@ -329,7 +302,7 @@ PY
                         --exit-code 0 \
                         "$BACKEND_IMAGE:$BUILD_NUMBER" \
                         > reports/trivy/backend.log 2>&1
-                    backend_scan_status=$?
+                    backend_status=$?
 
                     trivy image \
                         --format json \
@@ -338,14 +311,14 @@ PY
                         --exit-code 0 \
                         "$FRONTEND_IMAGE:$BUILD_NUMBER" \
                         > reports/trivy/frontend.log 2>&1
-                    frontend_scan_status=$?
+                    frontend_status=$?
 
                     printf 'backend_scan=%s\\nfrontend_scan=%s\\n' \
-                        "$backend_scan_status" "$frontend_scan_status" \
+                        "$backend_status" "$frontend_status" \
                         > reports/trivy/scan-status.txt
 
-                    if [ "$backend_scan_status" -ne 0 ] || \
-                       [ "$frontend_scan_status" -ne 0 ]; then
+                    if [ "$backend_status" -ne 0 ] ||
+                       [ "$frontend_status" -ne 0 ]; then
                         exit 1
                     fi
 
@@ -355,25 +328,28 @@ from pathlib import Path
 
 failed = False
 
-for path in [
+for path in (
     Path("reports/trivy/backend.json"),
     Path("reports/trivy/frontend.json"),
-]:
+):
     try:
         data = json.loads(path.read_text())
-        for result in data.get("Results", []):
+        for result in data.get("Results") or []:
             for vuln in result.get("Vulnerabilities") or []:
                 severity = vuln.get("Severity", "").upper()
                 if severity in ("HIGH", "CRITICAL"):
                     failed = True
-                    print(f"{path}: {severity} {vuln.get('VulnerabilityID', 'unknown')}")
+                    print(
+                        f"{path}: {severity} "
+                        f"{vuln.get('VulnerabilityID', 'unknown')}"
+                    )
     except Exception as exc:
-        print(f"Unable to parse {path}: {exc}")
+        print(f"Invalid Trivy report {path}: {exc}")
         failed = True
 
 Path("reports/trivy/quality-gate.txt").write_text(
-    "FAIL: HIGH/CRITICAL vulnerabilities found or scan report invalid\\n"
-    if failed else "PASS: no HIGH/CRITICAL vulnerabilities found\\n"
+    "FAIL: high/critical vulnerabilities found or scan invalid\\n"
+    if failed else "PASS: no high/critical vulnerabilities found\\n"
 )
 
 raise SystemExit(1 if failed else 0)
@@ -382,7 +358,13 @@ PY
             }
         }
 
-        stage('Push Docker Images') {
+        stage('Push Images to Docker Hub') {
+            when {
+                expression {
+                    currentBuild.currentResult == 'SUCCESS'
+                }
+            }
+
             steps {
                 withCredentials([
                     usernamePassword(
@@ -395,18 +377,19 @@ PY
                         set -eu
 
                         echo "$DOCKERHUB_TOKEN" | docker login \
-                            -u "$DOCKERHUB_USER" --password-stdin
+                            --username "$DOCKERHUB_USER" \
+                            --password-stdin
+
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
 
                         docker tag "$BACKEND_IMAGE:$BUILD_NUMBER" \
-                            "$DOCKERHUB_REPO-backend:$BUILD_NUMBER"
+                            "$DOCKERHUB_REPO:backend-$BUILD_NUMBER"
 
                         docker tag "$FRONTEND_IMAGE:$BUILD_NUMBER" \
-                            "$DOCKERHUB_REPO-frontend:$BUILD_NUMBER"
+                            "$DOCKERHUB_REPO:frontend-$BUILD_NUMBER"
 
-                        docker push "$DOCKERHUB_REPO-backend:$BUILD_NUMBER"
-                        docker push "$DOCKERHUB_REPO-frontend:$BUILD_NUMBER"
-
-                        docker logout
+                        docker push "$DOCKERHUB_REPO:backend-$BUILD_NUMBER"
+                        docker push "$DOCKERHUB_REPO:frontend-$BUILD_NUMBER"
                     '''
                 }
             }
@@ -417,7 +400,7 @@ PY
         always {
             script {
                 sh '''
-                    set +e
+                    mkdir -p reports/metadata
 
                     printf 'BUILD_NUMBER=%s\\n' "$BUILD_NUMBER" \
                         > reports/metadata/build-info.txt
@@ -438,8 +421,8 @@ PY
                         allowEmptyArchive: true,
                         fingerprint: true
                     )
-                } catch (Exception archiveError) {
-                    echo "REPORT_ARCHIVE_FAILED: ${archiveError.message}"
+                } catch (Exception err) {
+                    echo "REPORT_ARCHIVE_FAILED: ${err.message}"
                 }
 
                 try {
@@ -484,7 +467,7 @@ ASKPASS
                             git add "builds/$BUILD_NUMBER"
 
                             if git diff --cached --quiet; then
-                                echo "No report files changed; nothing to commit."
+                                echo "No report changes to commit."
                             else
                                 git commit -m "Add CI reports for build $BUILD_NUMBER"
                                 git push origin HEAD:main
@@ -493,9 +476,8 @@ ASKPASS
                             echo "REPORT_PUSH_SUCCESS"
                         '''
                     }
-                } catch (Exception publishError) {
-                    echo "REPORT_PUSH_FAILED: ${publishError.message}"
-                    echo "The CI result remains ${currentBuild.currentResult}; report publishing failed separately."
+                } catch (Exception err) {
+                    echo "REPORT_PUSH_FAILED: ${err.message}"
                 } finally {
                     sh '''
                         rm -f "$WORKSPACE/.git-askpass.sh" || true
@@ -508,11 +490,16 @@ ASKPASS
         }
 
         success {
-            echo 'CI pipeline completed successfully.'
+            archiveArtifacts(
+                artifacts: 'frontend/dist/**/*',
+                allowEmptyArchive: true,
+                fingerprint: true
+            )
+            echo 'All required CI checks passed and Docker images were published.'
         }
 
         failure {
-            echo 'CI pipeline failed. Available reports were archived and report publishing was attempted.'
+            echo 'CI failed. Later stages were skipped. Available reports were archived and GitHub publishing was attempted.'
         }
     }
 }
