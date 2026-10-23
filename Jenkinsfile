@@ -156,9 +156,10 @@ pipeline {
                                     -Dsonar.projectName="Sri Bhagyalakshmi Textiles" \
                                     -Dsonar.sources=backend,frontend/src \
                                     -Dsonar.tests=backend/tests \
-                                    -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** \
+                                    -Dsonar.test.inclusions=backend/tests/**/*.test.ts \
+                                    -Dsonar.exclusions=backend/tests/**,**/node_modules/**,**/dist/**,**/coverage/** \
                                     -Dsonar.javascript.lcov.reportPaths=reports/coverage/backend/lcov.info,reports/coverage/frontend/lcov.info \
-                                    -Dsonar.qualitygate.wait=true \
+                                    -Dsonar.qualitygate.wait=true
                                     > reports/sonarqube/scanner.log 2>&1
 
                                 result=$?
