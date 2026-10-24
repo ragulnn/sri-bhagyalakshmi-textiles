@@ -208,7 +208,8 @@ pipeline {
                                 exit 0
                             fi
 
-                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \\\n                                && [ "$attempt" -lt "$max_attempts" ]; then
+                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \
+                                && [ "$attempt" -lt "$max_attempts" ]; then
                                 echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
                                 rm -f "$audit_log"
                                 sleep 10
@@ -386,12 +387,14 @@ az containerapp update \\
 
                         retry(6) {
                             sleep(time: 10, unit: 'SECONDS')
-                            sh(label: 'Frontend HTTP smoke test', script: """#!/usr/bin/env bash
+                            withEnv(["FRONTEND_URL=${frontendUrl}"]) {
+                                sh(label: 'Frontend HTTP smoke test', script: '''#!/usr/bin/env bash
 set -euo pipefail
-code=\$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' '${frontendUrl}')
-echo "Frontend HTTP status: \$code"
-[[ \$code =~ ^(200|301|302)$ ]]
-""")
+code="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' "$FRONTEND_URL")"
+echo "Frontend HTTP status: $code"
+[[ "$code" =~ ^(200|301|302)$ ]]
+''')
+                            }
                         }
 
                         sh(label: 'Verify deployed image references', script: '''#!/usr/bin/env bash
