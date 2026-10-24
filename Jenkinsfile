@@ -13,23 +13,12 @@ pipeline {
         BACKEND_IMAGE = 'sri-bhagyalakshmi-textiles-backend'
         FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
         DOCKERHUB_REPO = 'ragdocker812/sri-bhagyalakshmi-textiles'
-        ARTIFACT_REPO = 'https://github.com/ragulnn/sbt-ci-artifacts.git'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-
-                sh '''
-                    set -eu
-                    mkdir -p reports/test-results
-                    mkdir -p reports/coverage
-                    mkdir -p reports/security
-                    mkdir -p reports/trivy
-                    mkdir -p reports/sonarqube
-                    mkdir -p reports/metadata
-                '''
             }
         }
 
@@ -38,10 +27,9 @@ pipeline {
                 dir('backend') {
                     sh '''
                         set -eu
-
-                        npm ci > ../reports/test-results/backend-install.log 2>&1
-                        npm run typecheck > ../reports/test-results/backend-typecheck.log 2>&1
-                        npm test > ../reports/test-results/backend-test.log 2>&1
+                        npm ci
+                        npm run typecheck
+                        npm test
                     '''
                 }
             }
@@ -57,54 +45,39 @@ pipeline {
                             --reporter=text \
                             --reporter=lcov \
                             --reports-dir=coverage \
-                            node --import tsx --test tests/*.test.ts \
-                            > ../reports/test-results/backend-coverage.log 2>&1
+                            node --import tsx --test tests/*.test.ts
 
                         test -s coverage/lcov.info
-
-                        mkdir -p ../reports/coverage/backend
-                        cp -R coverage/. ../reports/coverage/backend/
                     '''
                 }
+
+                archiveArtifacts(
+                    artifacts: 'backend/coverage/lcov.info',
+                    fingerprint: true
+                )
             }
         }
 
         stage('API Integration Tests') {
             steps {
-                script {
-                    try {
-                        sh '''
-                            set -eu
+                sh '''
+                    set -eu
 
-                            docker compose \
-                                -p sbt-ci-test \
-                                -f compose.test.yaml \
-                                up --build -d --wait \
-                                > reports/test-results/api-compose-up.log 2>&1
-                        '''
+                    docker compose -p sbt-ci-test \
+                        -f compose.test.yaml up \
+                        --build -d --wait
 
-                        dir('backend') {
-                            sh '''
-                                set -eu
+                    npm --prefix backend run test:integration
+                '''
+            }
 
-                                npm run test:integration \
-                                    > ../reports/test-results/api-integration.log 2>&1
-                            '''
-                        }
-                    } finally {
-                        sh '''
-                            docker compose \
-                                -p sbt-ci-test \
-                                -f compose.test.yaml \
-                                logs --no-color \
-                                > reports/test-results/api-compose-logs.log 2>&1 || true
-
-                            docker compose \
-                                -p sbt-ci-test \
-                                -f compose.test.yaml \
-                                down -v --remove-orphans || true
-                        '''
-                    }
+            post {
+                always {
+                    sh '''
+                        docker compose -p sbt-ci-test \
+                            -f compose.test.yaml down \
+                            --volumes --remove-orphans
+                    '''
                 }
             }
         }
@@ -115,16 +88,18 @@ pipeline {
                     sh '''
                         set -eu
 
-                        npm ci > ../reports/test-results/frontend-install.log 2>&1
-                        npm run build > ../reports/test-results/frontend-build.log 2>&1
-                        npm run test:coverage > ../reports/test-results/frontend-coverage.log 2>&1
+                        npm ci
+                        npm run build
+                        npm run test:coverage
 
                         test -s coverage/lcov.info
-
-                        mkdir -p ../reports/coverage/frontend
-                        cp -R coverage/. ../reports/coverage/frontend/
                     '''
                 }
+
+                archiveArtifacts(
+                    artifacts: 'frontend/coverage/lcov.info',
+                    fingerprint: true
+                )
             }
         }
 
@@ -133,10 +108,16 @@ pipeline {
                 sh '''
                     set -eu
 
-                    test -s reports/coverage/backend/lcov.info
-                    test -s reports/coverage/frontend/lcov.info
+                    echo "Checking backend coverage..."
+                    test -s backend/coverage/lcov.info
 
-                    echo "Backend and frontend coverage reports are available."
+                    echo "Checking frontend coverage..."
+                    test -s frontend/coverage/lcov.info
+
+                    echo "Both LCOV reports are available."
+                    wc -l \
+                        backend/coverage/lcov.info \
+                        frontend/coverage/lcov.info
                 '''
             }
         }
@@ -147,102 +128,96 @@ pipeline {
                     def scannerHome = tool 'SonarScanner'
 
                     withSonarQubeEnv('Local-SonarQube') {
-                        withEnv(["SONAR_SCANNER_PATH=${scannerHome}"]) {
-                            sh '''
-                                set +e
+                        sh """
+                            set -eu
 
-                                "$SONAR_SCANNER_PATH/bin/sonar-scanner" \
-                                    -Dsonar.projectKey=sri-bhagyalakshmi-textiles \
-                                    -Dsonar.projectName="Sri Bhagyalakshmi Textiles" \
-                                    -Dsonar.sources=backend,frontend/src \
-                                    -Dsonar.tests=backend/tests \
-                                    -Dsonar.test.inclusions=backend/tests/**/*.test.ts \
-                                    -Dsonar.exclusions=backend/tests/**,**/node_modules/**,**/dist/**,**/coverage/** \
-                                    -Dsonar.javascript.lcov.reportPaths=reports/coverage/backend/lcov.info,reports/coverage/frontend/lcov.info \
-                                    -Dsonar.qualitygate.wait=true
-                                    > reports/sonarqube/scanner.log 2>&1
-
-                                result=$?
-                                echo "$result" > reports/sonarqube/scanner-exit-code.txt
-                                cat reports/sonarqube/scanner.log
-                                exit "$result"
-                            '''
-                        }
+                            "${scannerHome}/bin/sonar-scanner" \
+                                '-Dsonar.projectKey=sri-bhagyalakshmi-textiles' \
+                                '-Dsonar.projectName=Sri Bhagyalakshmi Textiles' \
+                                '-Dsonar.sources=backend,frontend/src' \
+                                '-Dsonar.tests=backend/tests,frontend/src' \
+                                '-Dsonar.test.inclusions=backend/tests/**/*.test.ts,backend/tests/**/*.test.mjs,frontend/src/**/*.test.ts,frontend/src/**/*.test.tsx' \
+                                '-Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**,backend/tests/**,**/*.test.ts,**/*.test.tsx,**/*.test.mjs' \
+                                '-Dsonar.sourceEncoding=UTF-8' \
+                                '-Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info,frontend/coverage/lcov.info' \
+                                '-Dsonar.qualitygate.wait=true'
+                        """
                     }
-
-                    sh '''
-                        if [ -f .scannerwork/report-task.txt ]; then
-                            cp .scannerwork/report-task.txt \
-                                reports/sonarqube/report-task.txt
-                        fi
-                    '''
                 }
             }
         }
 
-        stage('Dependency Audit') {
+        stage('Security Scanning - npm audit') {
             steps {
+                // Retry temporary registry/DNS failures without hiding real vulnerabilities.
                 dir('backend') {
                     sh '''
                         set -eu
+                        attempt=1
+                        max_attempts=3
 
-                        set +e
-                        npm audit --json \
-                            > ../reports/security/backend-npm-audit.json 2>&1
-                        result=$?
-                        set -e
+                        while [ "$attempt" -le "$max_attempts" ]; do
+                            audit_log="$(mktemp)"
+                            set +e
+                            npm audit --audit-level=high \\
+                                --fetch-retries=3 \\
+                                --fetch-retry-mintimeout=10000 \\
+                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
+                            audit_status=$?
+                            cat "$audit_log"
+                            set -e
 
-                        echo "$result" > ../reports/security/backend-audit-exit-code.txt
+                            if [ "$audit_status" -eq 0 ]; then
+                                rm -f "$audit_log"
+                                exit 0
+                            fi
 
-                        python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path("../reports/security/backend-npm-audit.json")
-try:
-    data = json.loads(path.read_text())
-except Exception as exc:
-    print(f"Could not parse backend audit report: {exc}")
-    raise SystemExit(1)
-
-v = data.get("metadata", {}).get("vulnerabilities", {})
-print("Backend audit:", v)
-
-if v.get("high", 0) or v.get("critical", 0):
-    raise SystemExit(1)
-PY
+                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \
+                                && [ "$attempt" -lt "$max_attempts" ]; then
+                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
+                                rm -f "$audit_log"
+                                sleep 10
+                                attempt=$((attempt + 1))
+                            else
+                                rm -f "$audit_log"
+                                exit "$audit_status"
+                            fi
+                        done
                     '''
                 }
 
                 dir('frontend') {
                     sh '''
                         set -eu
+                        attempt=1
+                        max_attempts=3
 
-                        set +e
-                        npm audit --json \
-                            > ../reports/security/frontend-npm-audit.json 2>&1
-                        result=$?
-                        set -e
+                        while [ "$attempt" -le "$max_attempts" ]; do
+                            audit_log="$(mktemp)"
+                            set +e
+                            npm audit --audit-level=high \\
+                                --fetch-retries=3 \\
+                                --fetch-retry-mintimeout=10000 \\
+                                --fetch-retry-maxtimeout=60000 >"$audit_log" 2>&1
+                            audit_status=$?
+                            cat "$audit_log"
+                            set -e
 
-                        echo "$result" > ../reports/security/frontend-audit-exit-code.txt
+                            if [ "$audit_status" -eq 0 ]; then
+                                rm -f "$audit_log"
+                                exit 0
+                            fi
 
-                        python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path("../reports/security/frontend-npm-audit.json")
-try:
-    data = json.loads(path.read_text())
-except Exception as exc:
-    print(f"Could not parse frontend audit report: {exc}")
-    raise SystemExit(1)
-
-v = data.get("metadata", {}).get("vulnerabilities", {})
-print("Frontend audit:", v)
-
-if v.get("high", 0) or v.get("critical", 0):
-    raise SystemExit(1)
-PY
+                            if grep -Eqi 'EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|audit endpoint returned an error|request to .* failed' "$audit_log" \\\n                                && [ "$attempt" -lt "$max_attempts" ]; then
+                                echo "Temporary npm registry/network failure (attempt $attempt/$max_attempts); retrying in 10 seconds..."
+                                rm -f "$audit_log"
+                                sleep 10
+                                attempt=$((attempt + 1))
+                            else
+                                rm -f "$audit_log"
+                                exit "$audit_status"
+                            fi
+                        done
                     '''
                 }
             }
@@ -251,42 +226,31 @@ PY
         stage('Gitleaks Secret Scanning') {
             steps {
                 sh '''
-                    set +e
+                    set -eu
 
                     gitleaks detect \
                         --source . \
-                        --report-format json \
-                        --report-path reports/security/gitleaks.json \
+                        --config .gitleaks.toml \
                         --redact \
-                        --no-banner \
-                        > reports/security/gitleaks.log 2>&1
-
-                    result=$?
-                    echo "$result" > reports/security/gitleaks-exit-code.txt
-                    cat reports/security/gitleaks.log
-                    exit "$result"
+                        --exit-code 1
                 '''
             }
         }
 
-        stage('Build Docker Images') {
+        stage('Build Production Docker Images') {
             steps {
                 sh '''
                     set -eu
 
                     docker build \
-                        -t "$BACKEND_IMAGE:$BUILD_NUMBER" \
+                        -t "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
+                        -t "${BACKEND_IMAGE}:latest" \
                         ./backend
 
                     docker build \
-                        -t "$FRONTEND_IMAGE:$BUILD_NUMBER" \
+                        -t "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
+                        -t "${FRONTEND_IMAGE}:latest" \
                         ./frontend
-
-                    docker image inspect "$BACKEND_IMAGE:$BUILD_NUMBER" \
-                        > reports/metadata/backend-image-inspect.json
-
-                    docker image inspect "$FRONTEND_IMAGE:$BUILD_NUMBER" \
-                        > reports/metadata/frontend-image-inspect.json
                 '''
             }
         }
@@ -294,78 +258,22 @@ PY
         stage('Trivy Image Vulnerability Scan') {
             steps {
                 sh '''
-                    set +e
+                    set -eu
 
                     trivy image \
-                        --format json \
-                        --output reports/trivy/backend.json \
                         --severity HIGH,CRITICAL \
-                        --exit-code 0 \
-                        "$BACKEND_IMAGE:$BUILD_NUMBER" \
-                        > reports/trivy/backend.log 2>&1
-                    backend_status=$?
+                        --exit-code 1 \
+                        "${BACKEND_IMAGE}:${BUILD_NUMBER}"
 
                     trivy image \
-                        --format json \
-                        --output reports/trivy/frontend.json \
                         --severity HIGH,CRITICAL \
-                        --exit-code 0 \
-                        "$FRONTEND_IMAGE:$BUILD_NUMBER" \
-                        > reports/trivy/frontend.log 2>&1
-                    frontend_status=$?
-
-                    printf 'backend_scan=%s\\nfrontend_scan=%s\\n' \
-                        "$backend_status" "$frontend_status" \
-                        > reports/trivy/scan-status.txt
-
-                    if [ "$backend_status" -ne 0 ] ||
-                       [ "$frontend_status" -ne 0 ]; then
-                        exit 1
-                    fi
-
-                    python3 - <<'PY'
-import json
-from pathlib import Path
-
-failed = False
-
-for path in (
-    Path("reports/trivy/backend.json"),
-    Path("reports/trivy/frontend.json"),
-):
-    try:
-        data = json.loads(path.read_text())
-        for result in data.get("Results") or []:
-            for vuln in result.get("Vulnerabilities") or []:
-                severity = vuln.get("Severity", "").upper()
-                if severity in ("HIGH", "CRITICAL"):
-                    failed = True
-                    print(
-                        f"{path}: {severity} "
-                        f"{vuln.get('VulnerabilityID', 'unknown')}"
-                    )
-    except Exception as exc:
-        print(f"Invalid Trivy report {path}: {exc}")
-        failed = True
-
-Path("reports/trivy/quality-gate.txt").write_text(
-    "FAIL: high/critical vulnerabilities found or scan invalid\\n"
-    if failed else "PASS: no high/critical vulnerabilities found\\n"
-)
-
-raise SystemExit(1 if failed else 0)
-PY
+                        --exit-code 1 \
+                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}"
                 '''
             }
         }
 
-        stage('Push Images to Docker Hub') {
-            when {
-                expression {
-                    currentBuild.currentResult == 'SUCCESS'
-                }
-            }
-
+        stage('Push Images to Private Docker Hub') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -383,124 +291,157 @@ PY
 
                         trap 'docker logout >/dev/null 2>&1 || true' EXIT
 
-                        docker tag "$BACKEND_IMAGE:$BUILD_NUMBER" \
-                            "$DOCKERHUB_REPO:backend-$BUILD_NUMBER"
+                        docker tag \
+                            "${BACKEND_IMAGE}:${BUILD_NUMBER}" \
+                            "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
 
-                        docker tag "$FRONTEND_IMAGE:$BUILD_NUMBER" \
-                            "$DOCKERHUB_REPO:frontend-$BUILD_NUMBER"
+                        docker tag \
+                            "${FRONTEND_IMAGE}:${BUILD_NUMBER}" \
+                            "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
 
-                        docker push "$DOCKERHUB_REPO:backend-$BUILD_NUMBER"
-                        docker push "$DOCKERHUB_REPO:frontend-$BUILD_NUMBER"
+                        docker push "${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}"
+                        docker push "${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}"
                     '''
+                }
+            }
+        }
+
+        stage('Deploy to Azure Container Apps') {
+            when {
+                expression { !env.BRANCH_NAME || env.BRANCH_NAME == 'main' }
+            }
+            steps {
+                script {
+                    def backendImage = "docker.io/${env.DOCKERHUB_REPO}:backend-${env.BUILD_NUMBER}"
+                    def frontendImage = "docker.io/${env.DOCKERHUB_REPO}:frontend-${env.BUILD_NUMBER}"
+                    def frontendUrl = 'https://sbt-frontend.niceriver-151594b0.centralindia.azurecontainerapps.io'
+
+                    // Reuse the existing Jenkins username/password credential.
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'azure-acr',
+                            usernameVariable: 'AZURE_CLIENT_ID',
+                            passwordVariable: 'AZURE_CLIENT_SECRET'
+                        )
+                    ]) {
+                        sh(label: 'Authenticate to Azure', script: '''#!/usr/bin/env bash
+set -euo pipefail
+az login --service-principal \
+  --username "$AZURE_CLIENT_ID" \
+  --password "$AZURE_CLIENT_SECRET" \
+  --tenant 'b39b5cae-d7a4-4c51-a131-f33d7b6fa7f9' \
+  --output none
+
+# Display the selected subscription and tenant without printing credentials.
+az account show --query '{subscription:id, tenant:tenantId}' --output table
+''')
+
+                        // Deploy backend first. This stage never updates sbt-database.
+                        sh(label: 'Deploy backend image', script: """#!/usr/bin/env bash
+set -euo pipefail
+az containerapp update \\
+  --name sbt-backend \\
+  --resource-group rg-sbt-production \\
+  --image '${backendImage}' \\
+  --output none
+""")
+
+                        timeout(time: 8, unit: 'MINUTES') {
+                            waitUntil(initialRecurrencePeriod: 10000, quiet: true) {
+                                def state = sh(
+                                    script: "az containerapp show --name sbt-backend --resource-group rg-sbt-production --query properties.provisioningState --output tsv",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Backend provisioning state: ${state}"
+                                if (state == 'Failed') {
+                                    error('Azure reports that the backend deployment failed.')
+                                }
+                                return state == 'Succeeded'
+                            }
+                        }
+
+                        // Deploy frontend only after the backend update succeeds.
+                        sh(label: 'Deploy frontend image', script: """#!/usr/bin/env bash
+set -euo pipefail
+az containerapp update \\
+  --name sbt-frontend \\
+  --resource-group rg-sbt-production \\
+  --image '${frontendImage}' \\
+  --output none
+""")
+
+                        timeout(time: 8, unit: 'MINUTES') {
+                            waitUntil(initialRecurrencePeriod: 10000, quiet: true) {
+                                def state = sh(
+                                    script: "az containerapp show --name sbt-frontend --resource-group rg-sbt-production --query properties.provisioningState --output tsv",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Frontend provisioning state: ${state}"
+                                if (state == 'Failed') {
+                                    error('Azure reports that the frontend deployment failed.')
+                                }
+                                return state == 'Succeeded'
+                            }
+                        }
+
+                        retry(6) {
+                            sleep(time: 10, unit: 'SECONDS')
+                            sh(label: 'Frontend HTTP smoke test', script: """#!/usr/bin/env bash
+set -euo pipefail
+code=\$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' '${frontendUrl}')
+echo "Frontend HTTP status: \$code"
+[[ \$code =~ ^(200|301|302)$ ]]
+""")
+                        }
+
+                        sh(label: 'Verify deployed image references', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo 'Backend image:'
+az containerapp show --name sbt-backend --resource-group rg-sbt-production \
+  --query "properties.template.containers[0].image" --output tsv
+echo 'Frontend image:'
+az containerapp show --name sbt-frontend --resource-group rg-sbt-production \
+  --query "properties.template.containers[0].image" --output tsv
+''')
+                    }
                 }
             }
         }
     }
 
     post {
-        always {
-            script {
-                sh '''
-                    mkdir -p reports/metadata
-
-                    printf 'BUILD_NUMBER=%s\\n' "$BUILD_NUMBER" \
-                        > reports/metadata/build-info.txt
-                    printf 'JOB_NAME=%s\\n' "$JOB_NAME" \
-                        >> reports/metadata/build-info.txt
-                    printf 'BUILD_URL=%s\\n' "$BUILD_URL" \
-                        >> reports/metadata/build-info.txt
-                '''
-
-                writeFile(
-                    file: 'reports/metadata/build-result.txt',
-                    text: "Jenkins result: ${currentBuild.currentResult}\n"
-                )
-
-                try {
-                    archiveArtifacts(
-                        artifacts: 'reports/**/*',
-                        allowEmptyArchive: true,
-                        fingerprint: true
-                    )
-                } catch (Exception err) {
-                    echo "REPORT_ARCHIVE_FAILED: ${err.message}"
-                }
-
-                try {
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: 'github-pat',
-                            usernameVariable: 'GITHUB_USER',
-                            passwordVariable: 'GITHUB_TOKEN'
-                        )
-                    ]) {
-                        sh '''
-                            set -eu
-
-                            export GIT_TERMINAL_PROMPT=0
-                            export GIT_ASKPASS="$WORKSPACE/.git-askpass.sh"
-
-                            cat > "$GIT_ASKPASS" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-    *Username*) printf '%s\\n' "$GITHUB_USER" ;;
-    *Password*) printf '%s\\n' "$GITHUB_TOKEN" ;;
-    *) exit 1 ;;
-esac
-ASKPASS
-
-                            chmod 700 "$GIT_ASKPASS"
-
-                            repo_dir="$WORKSPACE/.ci-artifact-repo"
-                            rm -rf "$repo_dir"
-
-                            git clone "$ARTIFACT_REPO" "$repo_dir"
-
-                            destination="$repo_dir/builds/$BUILD_NUMBER"
-                            mkdir -p "$destination"
-                            cp -R reports/. "$destination/"
-
-                            cd "$repo_dir"
-
-                            git config user.name "Jenkins CI"
-                            git config user.email "jenkins-ci@users.noreply.github.com"
-
-                            git add "builds/$BUILD_NUMBER"
-
-                            if git diff --cached --quiet; then
-                                echo "No report changes to commit."
-                            else
-                                git commit -m "Add CI reports for build $BUILD_NUMBER"
-                                git push origin HEAD:main
-                            fi
-
-                            echo "REPORT_PUSH_SUCCESS"
-                        '''
-                    }
-                } catch (Exception err) {
-                    echo "REPORT_PUSH_FAILED: ${err.message}"
-                } finally {
-                    sh '''
-                        rm -f "$WORKSPACE/.git-askpass.sh" || true
-                        rm -rf "$WORKSPACE/.ci-artifact-repo" || true
-                    '''
-                }
-
-                echo "Final Jenkins result: ${currentBuild.currentResult}"
-            }
-        }
-
         success {
             archiveArtifacts(
-                artifacts: 'frontend/dist/**/*',
-                allowEmptyArchive: true,
+                artifacts: 'frontend/dist/**',
                 fingerprint: true
             )
-            echo 'All required CI checks passed and Docker images were published.'
+
+            echo '''
+                CI passed:
+                - Backend type checking and tests
+                - Backend coverage
+                - API integration tests
+                - Frontend build, tests, and coverage
+                - SonarQube quality gate
+                - Dependency security scanning
+                - Secret scanning
+                - Docker image builds and vulnerability scans
+                - Docker Hub image publishing
+                - Azure Container Apps deployment (main branch only)
+                - PostgreSQL Container App intentionally excluded from CD
+            '''
         }
 
         failure {
-            echo 'CI failed. Later stages were skipped. Available reports were archived and GitHub publishing was attempted.'
+            echo '''
+                CI failed. Review the failed stage and fix the underlying
+                issue before publishing or deploying images.
+            '''
+        }
+
+        always {
+            sh 'az logout >/dev/null 2>&1 || true'
+            echo 'Pipeline finished. Review the stage results above.'
         }
     }
 }
