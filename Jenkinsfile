@@ -13,6 +13,9 @@ pipeline {
         BACKEND_IMAGE = 'sri-bhagyalakshmi-textiles-backend'
         FRONTEND_IMAGE = 'sri-bhagyalakshmi-textiles-frontend'
         DOCKERHUB_REPO = 'ragdocker812/sri-bhagyalakshmi-textiles'
+        // Configure this in Jenkins (Manage Jenkins -> System -> Global properties).
+        // Use the subscription ID that contains rg-sbt-production.
+        AZURE_SUBSCRIPTION_ID = ''
     }
 
     stages {
@@ -325,16 +328,29 @@ pipeline {
                             passwordVariable: 'AZURE_CLIENT_SECRET'
                         )
                     ]) {
-                        sh(label: 'Authenticate to Azure', script: '''#!/usr/bin/env bash
+                        sh(label: 'Authenticate to Azure and select subscription', script: '''#!/usr/bin/env bash
 set -euo pipefail
+
+if [ -z "${AZURE_SUBSCRIPTION_ID:-}" ]; then
+  echo "ERROR: AZURE_SUBSCRIPTION_ID is not configured in Jenkins."
+  echo "Set it to the subscription ID that contains rg-sbt-production."
+  exit 2
+fi
+
 az login --service-principal \
   --username "$AZURE_CLIENT_ID" \
   --password "$AZURE_CLIENT_SECRET" \
   --tenant 'b39b5cae-d7a4-4c51-a131-f33d7b6fa7f9' \
   --output none
 
-# Display the selected subscription and tenant without printing credentials.
-az account show --query '{subscription:id, tenant:tenantId}' --output table
+# A successful service-principal login does not automatically select a subscription.
+az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+# Verify the selected subscription and tenant without printing credentials.
+az account show --query '{subscription:name, subscriptionId:id, tenantId:tenantId}' --output table
+
+# Fail before deployment if the expected production resource group is inaccessible.
+az group show --name rg-sbt-production --query '{name:name, location:location}' --output table
 ''')
 
                         // Deploy backend first. This stage never updates sbt-database.
